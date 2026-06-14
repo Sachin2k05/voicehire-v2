@@ -48,118 +48,43 @@ function dismissStartOverlay() {
     if (typeof speechSynthesis !== 'undefined') {
       speechSynthesis.getVoices()
     }
-    // Show login screen instead of jumping straight to language
-    showLoginScreen()
+    // Begin fully automatic voice login (speak prompt → beep → listen)
+    autoStartVoiceLogin()
   }, 500)
 }
 
 /* ══════════════════════════════════════════════
-   VOICE LANGUAGE SELECTION
+   START MAIN APP (English only — no language step)
 ══════════════════════════════════════════════ */
-function startVoiceLanguageSelection() {
-  if (State._voiceLangStarted) return
-  if (typeof speechSynthesis === 'undefined') return
-
-  speechSynthesis.getVoices()
-
-  // First-time users get a brief app intro before language selection
-  const isFirstTime = !localStorage.getItem('vh_seen_before')
-  const intro = isFirstTime
-    ? 'Welcome to VoiceHire! I help blind and visually impaired job seekers find and apply for jobs using only their voice. No typing needed at all. I will ask you a few questions, search for the best matching jobs, and apply on your behalf. '
-    : ''
-
-  if (isFirstTime) localStorage.setItem('vh_seen_before', '1')
-
-  const prompt = intro +
-    'Please say your language. ' +
-    'Say English, Hindi, Tamil, or Telugu.'
-
-  const hint = document.getElementById('lang-hint-live')
-  if (hint) hint.textContent = '🔊 Listening for your language...'
-
-  VoiceService.speak(prompt, function() {
-    listenForLanguage(0)
-  })
-}
-
-function listenForLanguage(attempt) {
-  if (attempt >= 3) {
-    selectLanguage('en-IN')
-    return
-  }
-  const saved = State.selectedLang
-  State.selectedLang = 'en-IN'
-
-  VoiceService.listen(
-    function(partial) {
-      const hint = document.getElementById('lang-hint-live')
-      if (hint) hint.textContent = '🎤 Heard: ' + partial
-    },
-    function(final) {
-      State.selectedLang = saved
-      const t = (final || '').toLowerCase()
-
-      if (t.includes('english') || t.includes('eng')) {
-        selectLanguage('en-IN')
-      } else if (t.includes('hindi')) {
-        selectLanguage('hi-IN')
-      } else if (t.includes('tamil')) {
-        selectLanguage('ta-IN')
-      } else if (t.includes('telugu')) {
-        selectLanguage('te-IN')
-      } else {
-        const retry = attempt === 0
-          ? 'Please say English, Hindi, Tamil, or Telugu.'
-          : 'Say your language name clearly.'
-        VoiceService.speak(retry, function() {
-          listenForLanguage(attempt + 1)
-        })
-      }
-    }
-  )
-}
-
-/* ══════════════════════════════════════════════
-   SELECT LANGUAGE
-══════════════════════════════════════════════ */
-function selectLanguage(langCode) {
-  State.selectedLang      = langCode
+function startMainApp() {
+  State.selectedLang      = 'en-IN'
   State._voiceLangStarted = true
 
   VoiceService.stopSpeaking()
   VoiceService.stopListening()
 
-  applyTranslations()
+  showMainApp()
+  console.log('[Backend] Token at app start:', !!BackendService.token)
 
-  const langScreen = document.getElementById('language-screen')
-  if (langScreen) langScreen.classList.add('fade-out')
+  State.loopRunning   = true
+  State.silenceCount  = 0
+  State.history       = []
+  State._afterApply   = false
+  State.jobIndex      = 0
+  State.jobs          = []
+  State.jobSearchDone = false
+  _submittedJobs = new Set()
+  _applicationInProgress = false
 
-  setTimeout(function() {
-    showMainApp()
-    // Auth is now handled by the login screen before reaching here.
-    // If user skipped login, token will be null and saveProfile will be skipped (guest mode).
-    console.log('[Backend] Token at app start:', !!BackendService.token)
+  const name = State.profile.name
+    ? State.profile.name.split(' ')[0]
+    : ''
+  const greeting = name
+    ? 'Hello ' + name + '! Welcome back to VoiceHire. ' +
+      'Let us continue where we left off.'
+    : GREETINGS['en-IN']
 
-    State.loopRunning   = true
-    State.silenceCount  = 0
-    State.history       = []
-    State._afterApply   = false
-    State.jobIndex      = 0
-    State.jobs          = []
-    State.jobSearchDone = false
-    _submittedJobs = new Set()
-    _applicationInProgress = false
-
-    const name = State.profile.name
-      ? State.profile.name.split(' ')[0]
-      : ''
-    const greeting = name
-      ? 'Hello ' + name + '! Welcome back to VoiceHire. ' +
-        'Let us continue where we left off.'
-      : GREETINGS[langCode] || GREETINGS['en-IN']
-
-    voiceLoop(greeting)
-  }, 500)
+  voiceLoop(greeting)
 }
 
 /* ══════════════════════════════════════════════
@@ -1018,21 +943,6 @@ document.addEventListener('DOMContentLoaded', function() {
       dismissStartOverlay()
     })
   }
-
-  /* Language cards */
-  document.querySelectorAll('.lang-card')
-    .forEach(function(card) {
-      card.addEventListener('click', function() {
-        card.style.borderColor = '#FFB800'
-        card.style.background  = 'rgba(255,184,0,0.1)'
-        VoiceService.stopSpeaking()
-        VoiceService.stopListening()
-        State._voiceLangStarted = true
-        setTimeout(function() {
-          selectLanguage(card.getAttribute('data-lang'))
-        }, 300)
-      })
-    })
 
   State._voiceLangStarted = false
 

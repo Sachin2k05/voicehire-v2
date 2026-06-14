@@ -341,18 +341,9 @@ function hideSleepMode() {
 }
 
 /* ══════════════════════════════════════════════
-   showLanguageScreen() / showMainApp()
+   showMainApp()
 ══════════════════════════════════════════════ */
-function showLanguageScreen() {
-  document.getElementById('language-screen')
-    .classList.remove('hidden')
-  document.getElementById('main-app')
-    .classList.add('hidden')
-}
-
 function showMainApp() {
-  document.getElementById('language-screen')
-    .classList.add('hidden')
   document.getElementById('main-app')
     .classList.remove('hidden')
 }

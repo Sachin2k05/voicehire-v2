@@ -1,8 +1,5 @@
 const GREETINGS = {
-  'en-IN': "Hello! I am VoiceHire, your personal job companion. I am going to help you find the perfect job through our conversation. No typing needed at all. What is your name?",
-  'ta-IN': "வணக்கம்! நான் VoiceHire. உங்களுக்கு வேலை தேட உதவ வந்தேன். உங்கள் பெயர் என்ன?",
-  'hi-IN': "नमस्ते! मैं VoiceHire हूं। मैं आपको नौकरी ढूंढने में मदद करूंगा। आपका नाम क्या है?",
-  'te-IN': "నమస్కారం! నేను VoiceHire. మీకు ఉద్యోగం వెతకడానికి సహాయం చేస్తాను. మీ పేరు ఏమిటి?"
+  'en-IN': "Hello! I am VoiceHire, your personal job companion. I am going to help you find the perfect job through our conversation. No typing needed at all. What is your name?"
 }
 
 const BANNER_TEXT = {
@@ -45,8 +42,5 @@ const PROFILE_FIELDS = [
 ]
 
 const SPEECH_RATES = {
-  'en-IN': 0.90,
-  'ta-IN': 0.85,
-  'hi-IN': 0.88,
-  'te-IN': 0.87
+  'en-IN': 0.90
 }

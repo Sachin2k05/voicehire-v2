@@ -19,8 +19,275 @@ let _webOtpController = null
 let _voiceRecog       = null
 
 /* ══════════════════════════════════════════════
-   SHOW / HIDE
+   BEEP SOUND — short audio cue before listening
 ══════════════════════════════════════════════ */
+function _playBeep(freq, duration) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.value = freq || 880
+    gain.gain.setValueAtTime(0.15, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (duration || 0.15))
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start()
+    osc.stop(ctx.currentTime + (duration || 0.15))
+    return new Promise(function (resolve) {
+      setTimeout(resolve, (duration || 0.15) * 1000 + 50)
+    })
+  } catch (e) {
+    return Promise.resolve()
+  }
+}
+
+/* ══════════════════════════════════════════════
+   AUTO-START VOICE LOGIN — called after tap
+   Flow: speak prompt → beep → auto-listen for phone
+         → confirm digits aloud → auto-send OTP
+         → beep → auto-listen for OTP digits → verify
+══════════════════════════════════════════════ */
+function autoStartVoiceLogin() {
+  showLoginScreen()
+
+  // If a session already exists, skip straight in
+  const saved = localStorage.getItem('vh_token')
+  if (saved) {
+    BackendService.token  = saved
+    BackendService.userId = localStorage.getItem('vh_userId')
+    _autoRestoreSession()
+    proceedToLanguage()
+    return
+  }
+
+  if (typeof speechSynthesis === 'undefined') return
+  speechSynthesis.getVoices()
+
+  const utter = new SpeechSynthesisUtterance(
+    'Welcome to VoiceHire. Please say your 10 digit phone number, one digit at a time, after the beep.'
+  )
+  utter.lang = 'en-IN'
+  utter.rate = 0.92
+
+  utter.onend = function () {
+    _playBeep(880, 0.18).then(function () {
+      _autoListenPhone(0)
+    })
+  }
+
+  window.speechSynthesis.speak(utter)
+}
+
+/* ══════════════════════════════════════════════
+   AUTO-LISTEN — phone number (auto-restart on silence)
+══════════════════════════════════════════════ */
+function _autoListenPhone(attempt) {
+  const status = document.getElementById('login-voice-status')
+  const btn     = document.getElementById('login-voice-btn')
+
+  if (!('webkitSpeechRecognition' in window) &&
+      !('SpeechRecognition' in window)) {
+    if (status) status.textContent = 'Voice not supported — please type your number below.'
+    return
+  }
+
+  if (attempt >= 3) {
+    if (status) status.textContent = 'Please type your 10-digit number below.'
+    return
+  }
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  _voiceRecog = new SR()
+  _voiceRecog.lang = 'en-IN'
+  _voiceRecog.continuous = false
+  _voiceRecog.interimResults = true
+
+  if (btn) {
+    btn.classList.add('listening')
+    btn.querySelector('.login-voice-label').textContent = 'Listening…'
+  }
+  if (status) status.textContent = '🎤 Listening for your phone number…'
+
+  let finalHeard = false
+
+  _voiceRecog.onresult = function (e) {
+    const transcript = Array.from(e.results)
+      .map(function (r) { return r[0].transcript }).join(' ')
+    const digits = transcript.replace(/\D/g, '')
+    if (status) status.textContent = digits ? ('Heard: ' + digits) : transcript
+
+    if (e.results[0].isFinal) {
+      finalHeard = true
+      const phoneDigits = transcript.replace(/\D/g, '').slice(0, 10)
+      const input = document.getElementById('login-phone')
+      if (input) input.value = phoneDigits
+
+      if (phoneDigits.length === 10) {
+        if (status) status.textContent = '✓ ' + phoneDigits
+        _speakAndConfirmPhone(phoneDigits)
+      } else {
+        // Not enough digits — ask again
+        if (status) status.textContent = 'Heard ' + phoneDigits.length + ' digits — need 10. Listen again.'
+        const retry = new SpeechSynthesisUtterance(
+          'I heard ' + phoneDigits.length + ' digits. Please say all 10 digits of your phone number after the beep.'
+        )
+        retry.lang = 'en-IN'
+        retry.rate = 0.92
+        retry.onend = function () {
+          _playBeep(880, 0.18).then(function () { _autoListenPhone(attempt + 1) })
+        }
+        window.speechSynthesis.speak(retry)
+      }
+    }
+  }
+
+  _voiceRecog.onend = function () {
+    _voiceRecog = null
+    if (btn) {
+      btn.classList.remove('listening')
+      btn.querySelector('.login-voice-label').textContent = 'Speak your phone number'
+    }
+    if (!finalHeard) {
+      // No speech detected — retry automatically
+      const retry = new SpeechSynthesisUtterance(
+        'I did not hear anything. Please say your 10 digit phone number after the beep.'
+      )
+      retry.lang = 'en-IN'
+      retry.rate = 0.92
+      retry.onend = function () {
+        _playBeep(880, 0.18).then(function () { _autoListenPhone(attempt + 1) })
+      }
+      window.speechSynthesis.speak(retry)
+    }
+  }
+
+  _voiceRecog.onerror = function () {
+    finalHeard = true // prevent double-retry from onend
+    _voiceRecog = null
+    if (btn) {
+      btn.classList.remove('listening')
+      btn.querySelector('.login-voice-label').textContent = 'Speak your phone number'
+    }
+    const retry = new SpeechSynthesisUtterance(
+      'Sorry, I could not hear clearly. Please say your 10 digit phone number after the beep.'
+    )
+    retry.lang = 'en-IN'
+    retry.rate = 0.92
+    retry.onend = function () {
+      _playBeep(880, 0.18).then(function () { _autoListenPhone(attempt + 1) })
+    }
+    window.speechSynthesis.speak(retry)
+  }
+
+  _voiceRecog.start()
+}
+
+/* ══════════════════════════════════════════════
+   CONFIRM PHONE ALOUD → AUTO-SEND OTP → BEEP → LISTEN FOR OTP
+══════════════════════════════════════════════ */
+function _speakAndConfirmPhone(phoneDigits) {
+  const spoken = phoneDigits.split('').join(', ')
+  const utter = new SpeechSynthesisUtterance(
+    'Your number is ' + spoken + '. Sending the verification code now.'
+  )
+  utter.lang = 'en-IN'
+  utter.rate = 0.92
+  utter.onend = function () {
+    sendOtp().then(function (ok) {
+      if (ok) {
+        const otpPrompt = new SpeechSynthesisUtterance(
+          'A 6 digit code has been sent to your phone by SMS. ' +
+          'Please say the 6 digits after the beep, one at a time.'
+        )
+        otpPrompt.lang = 'en-IN'
+        otpPrompt.rate = 0.92
+        otpPrompt.onend = function () {
+          _playBeep(660, 0.18).then(function () { _autoListenOtp(0) })
+        }
+        window.speechSynthesis.speak(otpPrompt)
+      }
+    })
+  }
+  window.speechSynthesis.speak(utter)
+}
+
+/* ══════════════════════════════════════════════
+   AUTO-LISTEN — OTP digits (fallback to Web OTP API too)
+══════════════════════════════════════════════ */
+function _autoListenOtp(attempt) {
+  if (attempt >= 4) {
+    const giveUp = new SpeechSynthesisUtterance(
+      'Please enter the code using the boxes on screen, or ask someone nearby for help.'
+    )
+    giveUp.lang = 'en-IN'
+    window.speechSynthesis.speak(giveUp)
+    return
+  }
+
+  if (!('webkitSpeechRecognition' in window) &&
+      !('SpeechRecognition' in window)) {
+    return  // Web OTP API or manual entry will handle it
+  }
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  const recog = new SR()
+  recog.lang = 'en-IN'
+  recog.continuous = false
+  recog.interimResults = true
+
+  const status = document.getElementById('otp-auto-label')
+  if (status) { status.style.display = ''; status.textContent = '🎤 Listening for the 6-digit code…' }
+
+  let finalHeard = false
+
+  recog.onresult = function (e) {
+    const transcript = Array.from(e.results)
+      .map(function (r) { return r[0].transcript }).join(' ')
+    const digits = transcript.replace(/\D/g, '')
+    if (status) status.textContent = digits ? ('Heard: ' + digits) : transcript
+
+    if (e.results[0].isFinal) {
+      finalHeard = true
+      const otpDigits = transcript.replace(/\D/g, '').slice(0, 6)
+      if (otpDigits.length === 6) {
+        _pasteOtp(otpDigits)  // auto-fills boxes + triggers verify
+      } else {
+        const retry = new SpeechSynthesisUtterance(
+          'I heard ' + otpDigits.length + ' digits. Please say all 6 digits of the code after the beep.'
+        )
+        retry.lang = 'en-IN'
+        retry.rate = 0.92
+        retry.onend = function () {
+          _playBeep(660, 0.18).then(function () { _autoListenOtp(attempt + 1) })
+        }
+        window.speechSynthesis.speak(retry)
+      }
+    }
+  }
+
+  recog.onend = function () {
+    if (!finalHeard) {
+      const retry = new SpeechSynthesisUtterance(
+        'I did not hear the code. Please say the 6 digits after the beep.'
+      )
+      retry.lang = 'en-IN'
+      retry.rate = 0.92
+      retry.onend = function () {
+        _playBeep(660, 0.18).then(function () { _autoListenOtp(attempt + 1) })
+      }
+      window.speechSynthesis.speak(retry)
+    }
+  }
+
+  recog.onerror = function () {
+    finalHeard = true
+  }
+
+  recog.start()
+}
+
+
 function showLoginScreen() {
   const s = document.getElementById('login-screen')
   if (s) s.classList.remove('hidden', 'fade-out')
@@ -43,8 +310,7 @@ function hideLoginScreen(cb) {
 
 function proceedToLanguage() {
   hideLoginScreen(function () {
-    showLanguageScreen()
-    setTimeout(startVoiceLanguageSelection, 800)
+    startMainApp()
   })
 }
 
@@ -98,7 +364,8 @@ async function sendOtp() {
   if (!phone) {
     errEl.textContent = 'Please enter a valid 10-digit Indian mobile number.'
     document.getElementById('login-phone').focus()
-    return
+    _speakError('That does not look like a valid 10 digit phone number. Please try again, or type it below.')
+    return false
   }
 
   _loginPhone = phone
@@ -107,6 +374,7 @@ async function sendOtp() {
   btn.disabled = true
   btn.innerHTML = '<span class="login-spinner"></span> Sending…'
 
+  let ok = false
   try {
     const res  = await fetch(BACKEND_URL + '/api/otp/send', {
       method:  'POST',
@@ -119,17 +387,28 @@ async function sendOtp() {
       _showOtpStep()
       _startResendTimer(30)
       _startWebOtpApi()        // Chrome Android autofill
+      ok = true
     } else {
       errEl.textContent = data.error || 'Failed to send OTP. Please try again.'
+      _speakError('Sorry, I could not send the code. ' + (data.error || 'Please try again.'))
     }
 
   } catch (err) {
     errEl.textContent = 'Connection error. Check your internet and try again.'
+    _speakError('Connection error. Please check your internet and try again.')
     console.error('[Login] sendOtp error:', err)
   }
 
   btn.disabled = false
   btn.textContent = 'Send OTP →'
+  return ok
+}
+
+function _speakError(text) {
+  const utter = new SpeechSynthesisUtterance(text)
+  utter.lang = 'en-IN'
+  utter.rate = 0.92
+  window.speechSynthesis.speak(utter)
 }
 
 /* ══════════════════════════════════════════════
@@ -299,6 +578,9 @@ async function verifyOtp() {
   btn.disabled = true
   btn.innerHTML = '<span class="login-spinner"></span> Verifying…'
 
+  const autoLabel = document.getElementById('otp-auto-label')
+  if (autoLabel) autoLabel.style.display = 'none'
+
   try {
     const res  = await fetch(BACKEND_URL + '/api/otp/verify', {
       method:  'POST',
@@ -320,26 +602,47 @@ async function verifyOtp() {
       }
 
       // Pre-load saved profile for returning users
+      let welcomeMsg = 'Verified successfully. Welcome to VoiceHire.'
       if (!data.isNew && data.profile) {
         _applyProfile(data.profile)
         console.log('[Login] Returning user — profile loaded')
+        const fname = data.profile.name ? data.profile.name.split(' ')[0] : ''
+        welcomeMsg = fname
+          ? 'Verified! Welcome back, ' + fname + '.'
+          : 'Verified! Welcome back.'
       } else {
         console.log('[Login] New user — starting fresh profile')
       }
 
       clearInterval(_resendTimer)
-      proceedToLanguage()
+
+      const utter = new SpeechSynthesisUtterance(welcomeMsg)
+      utter.lang = 'en-IN'
+      utter.rate = 0.92
+      utter.onend = function () { proceedToLanguage() }
+      window.speechSynthesis.speak(utter)
 
     } else {
       errEl.textContent = data.error || 'Incorrect code. Please try again.'
       _shakeOtpBoxes()
       _clearOtpBoxes()
       document.getElementById('otp-0').focus()
+
+      const retry = new SpeechSynthesisUtterance(
+        (data.error || 'Incorrect code') + '. Please say the 6 digit code again after the beep.'
+      )
+      retry.lang = 'en-IN'
+      retry.rate = 0.92
+      retry.onend = function () {
+        _playBeep(660, 0.18).then(function () { _autoListenOtp(0) })
+      }
+      window.speechSynthesis.speak(retry)
     }
 
   } catch (err) {
     errEl.textContent = 'Connection error. Please try again.'
     console.error('[Login] verifyOtp error:', err)
+    _speakError('Connection error. Please try again.')
   }
 
   btn.disabled = false
