@@ -277,7 +277,7 @@ function updateProfileField(key, value) {
   const progressBar = document.getElementById('profile-progress')
   const countEl     = document.getElementById('profile-count')
   if (progressBar) progressBar.style.width = pct + '%'
-  if (countEl)     countEl.textContent     = filled + ' of 8'
+  if (countEl)     countEl.textContent     = filled + ' of ' + PROFILE_FIELDS.length
 }
 
 /* ══════════════════════════════════════════════
@@ -455,5 +455,3 @@ function escHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
 }
-
-
