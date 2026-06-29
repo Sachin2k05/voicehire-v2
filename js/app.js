@@ -79,12 +79,31 @@ function startMainApp() {
   const name = State.profile.name
     ? State.profile.name.split(' ')[0]
     : ''
-  const greeting = name
-    ? 'Hello ' + name + '! Welcome back to VoiceHire. ' +
-      'Let us continue where we left off.'
-    : GREETINGS['en-IN']
 
-  voiceLoop(greeting)
+  // Returning user with enough profile data — skip straight to job search
+  const coreFields = ['name', 'skills', 'location', 'jobType']
+  const hasCoreProfile = coreFields.every(function(f) {
+    return State.profile[f] && String(State.profile[f]).trim() !== ''
+  })
+
+  if (hasCoreProfile) {
+    const greeting = 'Hello ' + name + '! Welcome back to VoiceHire. ' +
+      'I have loaded your saved profile. Let me find the best matching jobs for you right now!'
+    State.jobSearchDone = false
+    voiceLoop(greeting)
+    // Auto-trigger job search after greeting
+    setTimeout(function() {
+      if (!State.jobSearchDone) {
+        State.jobSearchDone = true
+        startJobSearch()
+      }
+    }, 4000)
+  } else {
+    const greeting = name
+      ? 'Hello ' + name + '! Welcome back to VoiceHire. Let us continue where we left off.'
+      : GREETINGS['en-IN']
+    voiceLoop(greeting)
+  }
 }
 
 /* ══════════════════════════════════════════════
@@ -350,6 +369,26 @@ async function handleJobPhaseInput(userText) {
           )
         }
       }
+      break
+
+    case 'APPLICATION_HISTORY':
+      // Read out the jobs applied so far in this session
+      if (_submittedJobs && _submittedJobs.size > 0) {
+        const appliedList = Array.from(_submittedJobs).join(', ')
+        voiceLoop(
+          'In this session you applied to: ' + appliedList + '. ' +
+          'All applications have been saved. Shall I find more jobs?'
+        )
+      } else {
+        voiceLoop(
+          'You have not applied to any jobs yet in this session. ' +
+          'Shall I read the current job again?'
+        )
+      }
+      break
+
+    case 'SLEEP':
+      enterSleepMode()
       break
 
     case 'MORE_INFO':

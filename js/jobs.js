@@ -66,7 +66,7 @@ const JobService = {
       (window.location.hostname === 'localhost' ||
         window.location.hostname === '127.0.0.1'
         ? 'http://localhost:3001'
-        : 'https://voicehire-backend.onrender.com') +
+        : 'https://voicehire-backend-v2.onrender.com') +
       '/api/jobs/search' +
       '?skills=' + encodeURIComponent(skills) +
       '&location=' + encodeURIComponent(loc)

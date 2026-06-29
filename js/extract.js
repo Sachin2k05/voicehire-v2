@@ -310,18 +310,32 @@ const Extractor = {
   extractSalary(text, t) {
     if (State.profile.salary) return
 
+    // Word-form numbers → digits first
+    const wordNums = {
+      'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+      'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+      'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14,
+      'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18,
+      'nineteen': 19, 'twenty': 20, 'twenty five': 25, 'thirty': 30
+    }
+    let normalized = t
+    Object.keys(wordNums).forEach(function(word) {
+      const re = new RegExp('\\b' + word + '\\b', 'gi')
+      normalized = normalized.replace(re, String(wordNums[word]))
+    })
+
     // Pattern 1: "7 LPA" or "7 lakhs" or "7-9 LPA"
     const p1 = /(\d+)\s*(?:to|-)\s*(\d+)\s*(?:lpa|lakhs?|lac)/i
     const p2 = /(\d+)\s*(?:lpa|lakhs?|lac)/i
 
     // Pattern 2: "7,00,000" or "700000" (Indian format)
-    const p3 = /(\d{1,2}),(\d{2}),(\d{3})/  // 7,00,000
-    const p4 = /(\d{5,7})/                   // 700000
+    const p3 = /(\d{1,2}),(\d{2}),(\d{3})/
+    const p4 = /(\d{5,7})/
 
     // Pattern 3: "7 thousand" "7k per year"
     const p5 = /(\d+)\s*(?:thousand|k)\s*(?:per year|pa|annually)?/i
 
-    const src = text || t
+    const src = normalized
     let salary = null
 
     if (p1.test(src)) {
@@ -331,13 +345,11 @@ const Extractor = {
       const m = src.match(p2)
       salary = m[1] + ' LPA'
     } else if (p3.test(src)) {
-      // Convert 7,00,000 → 7 LPA
       const m = src.match(p3)
       const num = parseInt(m[0].replace(/,/g, ''))
       const lakhs = Math.round(num / 100000)
       salary = lakhs + ' LPA'
     } else if (p4.test(src)) {
-      // Convert 700000 → 7 LPA
       const m = src.match(p4)
       const num = parseInt(m[1])
       if (num >= 100000) {
@@ -421,11 +433,43 @@ const Extractor = {
 
   extractEmail(text, t) {
     if (State.profile.email) return
-    // Standard email pattern
-    const m = text.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)
-    if (m) {
-      updateProfileField('email', m[0].toLowerCase())
-      console.log('[Extract] Email:', m[0])
+
+    // First: try direct standard email pattern in raw text
+    const direct = text.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)
+    if (direct) {
+      updateProfileField('email', direct[0].toLowerCase())
+      console.log('[Extract] Email:', direct[0])
+      return
+    }
+
+    // Second: handle spoken email with spaces e.g. "sachin 2005 0820 @ gmail . com"
+    // Remove spaces around @ and .
+    const cleaned = text
+      .replace(/\s+at\s+/gi, '@')       // "at" → @
+      .replace(/\s+dot\s+/gi, '.')      // "dot" → .
+      .replace(/\s*@\s*/g, '@')         // spaces around @
+      .replace(/\s*\.\s*com/gi, '.com') // spaces before .com
+      .replace(/\s*\.\s*in/gi, '.in')
+      .replace(/\s*\.\s*org/gi, '.org')
+      .replace(/\s*\.\s*net/gi, '.net')
+
+    const spoken = cleaned.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/)
+    if (spoken) {
+      updateProfileField('email', spoken[0].toLowerCase())
+      console.log('[Extract] Email (spoken):', spoken[0])
+      return
+    }
+
+    // Third: reconstruct from fragments like "sachin 2005 0820 gmail com"
+    // Find "gmail" or "yahoo" or "outlook" mentions and build email
+    const gmailMatch = t.match(/([a-z0-9]+(?:\s+[a-z0-9]+)*)\s+(?:at\s+)?gmail/)
+    if (gmailMatch) {
+      const user = gmailMatch[1].replace(/\s+/g, '')
+      if (user.length >= 3) {
+        const email = user + '@gmail.com'
+        updateProfileField('email', email)
+        console.log('[Extract] Email (reconstructed):', email)
+      }
     }
   },
 
@@ -479,13 +523,21 @@ const Extractor = {
 
   extractLinkedIn(text, t) {
     if (State.profile.linkedIn) return
-    // Skip / don't have
-    if (t.includes('no linkedin') || t.includes('don\'t have') ||
-        t.includes('do not have') || t.includes('skip') ||
-        t.includes('no link') || t.includes('not have')) {
+
+    // All "don't have / skip" variations — mark as Not provided
+    const noLinkedIn = [
+      "don't have", "do not have", "haven't", "no linkedin",
+      "not have", "no link", "skip", "i don't use",
+      "don't use", "not using", "not on linkedin",
+      "no profile", "nothing", "none", "nope", "na",
+      "i have no", "don't have a linkedin"
+    ]
+    if (noLinkedIn.some(function(p) { return t.includes(p) })) {
       updateProfileField('linkedIn', 'Not provided')
+      console.log('[Extract] LinkedIn: skipped')
       return
     }
+
     // URL pattern
     const m = text.match(/(?:linkedin\.com\/in\/|linkedin\.com\/pub\/)([A-Za-z0-9\-_%]+)/i)
     if (m) {

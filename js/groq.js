@@ -128,7 +128,7 @@ RETURN JSON: {"response": "...", "extracted": {}}`
         return this.fallback(messages[messages.length-1].content)
       }
 
-      const raw = data?.choices?.[0]?.message?.content
+      const raw = data.content
       if (!raw) return this.fallback('')
 
       try {
@@ -185,7 +185,7 @@ RETURN JSON: {"response": "...", "extracted": {}}`
           body: JSON.stringify({
             model:       'llama-3.1-8b-instant',
             messages:    messages,
-            max_tokens:  200,
+            max_tokens:  350,
             temperature: 0.7
           })
         }
@@ -224,6 +224,37 @@ RETURN JSON: {"response": "...", "extracted": {}}`
 
   _localIntent(userText) {
     const t = userText.toLowerCase().trim()
+
+    // APPLICATION HISTORY patterns — check FIRST before APPLY
+    if (
+      t.includes('applied') ||
+      t.includes('my applications') ||
+      t.includes('jobs i applied') ||
+      t.includes('what did i apply') ||
+      t.includes('applied so far') ||
+      t.includes('applied till now') ||
+      t.includes('show my applications') ||
+      t.includes('application status') ||
+      t.includes('see the jobs') ||
+      (t.includes('see') && t.includes('applied')) ||
+      (t.includes('what') && t.includes('applied'))
+    ) {
+      return { intent: 'APPLICATION_HISTORY', reason: 'keyword' }
+    }
+
+    // SLEEP patterns
+    if (
+      t.includes('sleep') ||
+      t.includes('go to sleep') ||
+      t.includes('sleep mode') ||
+      t.includes('stop for now') ||
+      t.includes('pause') ||
+      t.includes('wake me') ||
+      t === 'bye' ||
+      t === 'goodbye'
+    ) {
+      return { intent: 'SLEEP', reason: 'keyword' }
+    }
 
     // SKIP / NEXT patterns
     if (
